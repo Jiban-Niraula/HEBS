@@ -23,6 +23,7 @@ fi
 
 chmod 664 "$database_file"
 chown www-data:www-data "$database_file"
+chown www-data:www-data "$(dirname "$database_file")"
 chown -R www-data:www-data storage bootstrap/cache
 
 php artisan migrate --force

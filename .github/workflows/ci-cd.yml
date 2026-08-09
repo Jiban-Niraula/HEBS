@@ -7,144 +7,159 @@ on:
       - main
   workflow_dispatch:
 
-permissions:
-  contents: read
-
 concurrency:
   group: hebs-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  REGISTRY: ghcr.io
 
 jobs:
-  backend:
-    name: Laravel tests
+  image:
+    name: Test and publish image
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    env:
-      APP_ENV: testing
-      DB_CONNECTION: sqlite
-      DB_DATABASE: ${{ github.workspace }}/database/ci.sqlite
-      CACHE_STORE: array
-      MAIL_MAILER: array
-      QUEUE_CONNECTION: sync
-      SESSION_DRIVER: array
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image_ref: ${{ steps.reference.outputs.image_ref }}
     steps:
       - name: Check out source
         uses: actions/checkout@v6
 
-      - name: Set up PHP
-        uses: shivammathur/setup-php@v2
+      - name: Set image name
+        id: image_name
+        shell: bash
+        run: echo "name=${REGISTRY}/${GITHUB_REPOSITORY,,}" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build the test target
+        uses: docker/build-push-action@v7
         with:
-          php-version: '8.4'
-          extensions: mbstring, pdo_sqlite
-          coverage: none
-          tools: composer:v2
+          context: .
+          target: test
+          push: false
+          cache-from: type=gha,scope=hebs-test
+          cache-to: type=gha,mode=max,scope=hebs-test
 
-      - name: Cache Composer packages
-        uses: actions/cache@v5
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v4
         with:
-          path: ~/.cache/composer/files
-          key: ${{ runner.os }}-composer-${{ hashFiles('composer.lock') }}
-          restore-keys: ${{ runner.os }}-composer-
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install PHP dependencies
-        run: composer install --prefer-dist --no-interaction --no-progress
-
-      - name: Prepare test application
-        run: |
-          cp .env.example .env
-          php artisan key:generate
-          touch database/ci.sqlite
-          php artisan migrate:fresh --seed --force
-
-      - name: Run Laravel tests
-        run: composer test
-
-  frontend:
-    name: React production build
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Check out source
-        uses: actions/checkout@v6
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
+      - name: Build the production image
+        id: production
+        uses: docker/build-push-action@v7
         with:
-          node-version: '22'
-          cache: npm
+          context: .
+          target: production
+          push: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+          tags: |
+            ${{ steps.image_name.outputs.name }}:${{ github.sha }}
+            ${{ steps.image_name.outputs.name }}:latest
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=hebs-production
+          cache-to: type=gha,mode=max,scope=hebs-production
 
-      - name: Install frontend dependencies
-        run: npm ci
-
-      - name: Build frontend
-        run: npm run build
+      - name: Export immutable image reference
+        id: reference
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          IMAGE_NAME: ${{ steps.image_name.outputs.name }}
+          IMAGE_DIGEST: ${{ steps.production.outputs.digest }}
+        run: echo "image_ref=${IMAGE_NAME}@${IMAGE_DIGEST}" >> "${GITHUB_OUTPUT}"
 
   deploy:
-    name: Deploy to production VPS
-    needs:
-      - backend
-      - frontend
+    name: Deploy on AlmaLinux
+    needs: image
     if: >-
       github.event_name != 'pull_request' &&
       github.ref == 'refs/heads/main' &&
-      vars.ENABLE_VPS_DEPLOYMENT == 'true'
+      vars.ENABLE_PRODUCTION_DEPLOYMENT == 'true'
     runs-on:
       - self-hosted
       - linux
       - hebs-production
-    timeout-minutes: 20
+    timeout-minutes: 15
     environment: production
+    permissions:
+      contents: read
+      packages: read
     env:
+      HEBS_IMAGE: ${{ needs.image.outputs.image_ref }}
       HEBS_DATA_DIR: ${{ vars.HEBS_DATA_DIR }}
-      PRODUCTION_ENV_FILE: ${{ secrets.PRODUCTION_ENV_FILE }}
+      HEBS_BIND_ADDRESS: ${{ vars.HEBS_BIND_ADDRESS || '0.0.0.0' }}
+      HEBS_HTTP_PORT: ${{ vars.HEBS_HTTP_PORT || '80' }}
+      COMPOSE_PROJECT_NAME: hebs
     steps:
-      - name: Check out source
+      - name: Check out trusted source
         uses: actions/checkout@v6
 
-      - name: Verify deployment configuration
+      - name: Verify the host and deployment configuration
         shell: bash
         run: |
-          set -euo pipefail
-          if [[ -z "${PRODUCTION_ENV_FILE}" ]]; then
-            echo "The production environment secret is not configured." >&2
-            exit 1
-          fi
+          set -Eeuo pipefail
           if [[ -z "${HEBS_DATA_DIR}" || "${HEBS_DATA_DIR}" != /* ]]; then
-            echo "HEBS_DATA_DIR must be configured as an absolute VPS path." >&2
+            echo "HEBS_DATA_DIR must be configured as an absolute AlmaLinux host path." >&2
             exit 1
           fi
-          if ! command -v docker >/dev/null || ! docker compose version >/dev/null; then
-            echo "Docker with the Compose plugin is required on the runner." >&2
+          if [[ -z "${HEBS_IMAGE}" || "${HEBS_IMAGE}" != *@sha256:* ]]; then
+            echo "The build job did not provide an immutable image digest." >&2
             exit 1
           fi
+          docker version >/dev/null
+          docker compose version >/dev/null
 
-      - name: Prepare persistent storage and environment
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install deployment configuration
         shell: bash
+        env:
+          PRODUCTION_ENV_FILE: ${{ secrets.PRODUCTION_ENV_FILE }}
         run: |
-          set -euo pipefail
-          mkdir -p "${HEBS_DATA_DIR}/uploads"
-          touch "${HEBS_DATA_DIR}/database.sqlite"
-          chmod 664 "${HEBS_DATA_DIR}/database.sqlite"
-          echo "HOST_UID=$(id -u)" >> "${GITHUB_ENV}"
-          echo "HOST_GID=$(id -g)" >> "${GITHUB_ENV}"
+          set -Eeuo pipefail
+          if [[ -z "${PRODUCTION_ENV_FILE}" ]]; then
+            echo "The PRODUCTION_ENV_FILE environment secret is empty." >&2
+            exit 1
+          fi
+          deployment_dir="${HEBS_DATA_DIR}/deployment"
+          install -d -m 0700 "${deployment_dir}"
+          mkdir -p "${HEBS_DATA_DIR}/database" "${HEBS_DATA_DIR}/uploads"
+          install -m 0644 compose.production.yml "${deployment_dir}/compose.production.yml"
+          install -m 0755 scripts/deploy.sh "${deployment_dir}/deploy.sh"
           umask 077
-          printf '%s\n' "${PRODUCTION_ENV_FILE}" > .env.production
+          printf '%s\n' "${PRODUCTION_ENV_FILE}" > "${deployment_dir}/.env.production.tmp"
+          mv "${deployment_dir}/.env.production.tmp" "${deployment_dir}/.env.production"
+          echo "HEBS_ENV_FILE=${deployment_dir}/.env.production" >> "${GITHUB_ENV}"
+          echo "HEBS_COMPOSE_FILE=${deployment_dir}/compose.production.yml" >> "${GITHUB_ENV}"
 
-      - name: Build and deploy
+      - name: Deploy and wait for health check
+        shell: bash
+        run: "${HEBS_DATA_DIR}/deployment/deploy.sh"
+
+      - name: Show deployment diagnostics
+        if: failure()
         shell: bash
         run: |
-          set -euo pipefail
-          docker compose -f compose.production.yml build --pull
-          docker compose -f compose.production.yml up -d --remove-orphans --wait --wait-timeout 120
-
-      - name: Show deployment status
-        if: always()
-        shell: bash
-        run: |
-          if [[ -f .env.production ]]; then
-            docker compose -f compose.production.yml ps
-          fi
-
-      - name: Remove temporary environment file
-        if: always()
-        run: rm -f .env.production
+          docker compose \
+            --project-name "${COMPOSE_PROJECT_NAME}" \
+            --file "${HEBS_COMPOSE_FILE}" \
+            ps || true
+          docker compose \
+            --project-name "${COMPOSE_PROJECT_NAME}" \
+            --file "${HEBS_COMPOSE_FILE}" \
+            logs --no-color --tail 100 web || true

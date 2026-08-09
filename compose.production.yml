@@ -1,23 +1,27 @@
+name: hebs
+
 services:
   web:
-    container_name: hebs-site
-    build:
-      context: .
-      args:
-        APP_UID: ${HOST_UID:-1000}
-        APP_GID: ${HOST_GID:-1000}
-    image: hebs-site:production
+    image: ${HEBS_IMAGE:?HEBS_IMAGE must reference a published production image}
     restart: unless-stopped
+    init: true
     env_file:
-      - .env.production
+      - ${HEBS_ENV_FILE:?HEBS_ENV_FILE must point to the production environment file}
     ports:
-      - "80:80"
+      - "${HEBS_BIND_ADDRESS:-0.0.0.0}:${HEBS_HTTP_PORT:-80}:80"
     volumes:
-      - ${HEBS_DATA_DIR:-./shared}/database.sqlite:/var/www/html/database/database.sqlite
-      - ${HEBS_DATA_DIR:-./shared}/uploads:/var/www/html/storage/app/public
+      # The Z flag gives these bind mounts a private SELinux label on AlmaLinux.
+      - ${HEBS_DATA_DIR:?HEBS_DATA_DIR must be an absolute host path}/database:/var/www/html/database:rw,Z
+      - ${HEBS_DATA_DIR:?HEBS_DATA_DIR must be an absolute host path}/uploads:/var/www/html/storage/app/public:rw,Z
     healthcheck:
       test: ["CMD", "php", "-r", "exit(@file_get_contents('http://127.0.0.1/api/v1/context?page=%2F') === false ? 1 : 0);"]
-      interval: 30s
+      interval: 15s
       timeout: 5s
-      retries: 3
-      start_period: 30s
+      retries: 5
+      start_period: 45s
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

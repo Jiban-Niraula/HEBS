@@ -74,35 +74,12 @@ php artisan migrate:fresh --seed
 
 The seeded foundation includes school settings, the Academic Navy palette, and the initial academic programs.
 
-## CI/CD and VPS deployment
+## CI/CD and AlmaLinux deployment
 
-GitHub Actions runs the Laravel test suite and the React production build for pull requests and pushes to
-`main`. Production deployment is disabled until a self-hosted VPS runner is ready.
+CI builds and tests the application entirely in Docker. Successful `main` builds are published to GHCR,
+then the self-hosted AlmaLinux runner pulls and deploys the exact image digest with Docker Compose. The
+SQLite database and uploads remain in a persistent host directory, and a failed health check triggers an
+automatic application-image rollback.
 
-To enable deployment:
-
-1. Install Docker Engine with the Compose plugin on the VPS. The runner user must be able to run `docker`
-   without `sudo`.
-2. Add a GitHub Actions self-hosted runner to the repository with the labels `linux` and
-   `hebs-production` (the default `self-hosted` label is added by GitHub).
-3. Create a GitHub `production` environment and add a secret named `PRODUCTION_ENV_FILE`. Its value must
-   be the complete production Laravel environment file, including a valid `APP_KEY`, a strong initial admin
-   password, and the SQLite settings:
-
-   ```dotenv
-   APP_ENV=production
-   APP_DEBUG=false
-   APP_URL=https://example.com
-   APP_KEY=base64:replace-with-a-generated-key
-   HEBS_ADMIN_PASSWORD=replace-with-a-long-unique-password
-   DB_CONNECTION=sqlite
-   DB_DATABASE=/var/www/html/database/database.sqlite
-   ```
-
-4. Add a repository variable named `HEBS_DATA_DIR` with an absolute VPS path such as `/srv/hebs`. The
-   SQLite database and uploaded files are kept there, outside the temporary Actions checkout.
-5. Add the repository variable `ENABLE_VPS_DEPLOYMENT` with the value `true`.
-
-After those settings are present, every successful push to `main` builds and starts the production Compose
-service. The deployment waits for its health check before it reports success. To disable automatic
-deployment without changing the workflow, set `ENABLE_VPS_DEPLOYMENT` to `false`.
+Follow the complete [AlmaLinux production deployment guide](docs/deployment.md). The checked-in
+[production environment template](.env.production.example) lists the required Laravel runtime settings.
