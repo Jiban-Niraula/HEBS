@@ -17,7 +17,7 @@ concurrency:
 jobs:
   backend:
     name: Laravel tests
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
       APP_ENV: testing
@@ -61,7 +61,7 @@ jobs:
 
   frontend:
     name: React production build
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Check out source
