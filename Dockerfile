@@ -23,6 +23,14 @@ RUN --mount=type=cache,target=/tmp/composer-cache \
 COPY . .
 RUN composer dump-autoload --no-dev --classmap-authoritative --no-interaction
 
+FROM node:22-alpine AS frontend
+
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci
+COPY . .
+RUN npm run build
+
 FROM php-build AS test
 
 WORKDIR /app
@@ -34,6 +42,7 @@ RUN --mount=type=cache,target=/tmp/composer-cache \
         --no-scripts \
         --prefer-dist
 COPY . .
+COPY --from=frontend /app/public/build ./public/build
 RUN composer dump-autoload --optimize --no-interaction \
     && cp .env.example .env \
     && php artisan key:generate --force \
@@ -54,14 +63,6 @@ RUN composer dump-autoload --optimize --no-interaction \
        QUEUE_CONNECTION=sync \
        MAIL_MAILER=array \
        composer test
-
-FROM node:22-alpine AS frontend
-
-WORKDIR /app
-COPY package.json package-lock.json ./
-RUN --mount=type=cache,target=/root/.npm npm ci
-COPY . .
-RUN npm run build
 
 FROM php:8.4-apache AS production
 
