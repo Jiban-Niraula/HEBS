@@ -1,0 +1,34 @@
+{
+  "name": "hebs/school-platform",
+  "type": "project",
+  "description": "Reusable school website and content management system",
+  "require": {
+    "php": "^8.2",
+    "laravel/framework": "^11.0"
+  },
+  "require-dev": {
+    "laravel/pint": "^1.13",
+    "phpunit/phpunit": "^11.0"
+  },
+  "autoload": {
+    "psr-4": {
+      "App\\": "app/"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "Database\\Factories\\": "database/factories/",
+      "Database\\Seeders\\": "database/seeders/",
+      "Tests\\": "tests/"
+    }
+  },
+  "scripts": {
+    "post-autoload-dump": [
+      "Illuminate\\Foundation\\ComposerScripts::postAutoloadDump",
+      "@php artisan package:discover --ansi"
+    ],
+    "test": [
+      "@php vendor/bin/phpunit"
+    ]
+  }
+}

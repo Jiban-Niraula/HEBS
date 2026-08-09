@@ -1,0 +1,39 @@
+#!/bin/sh
+set -eu
+
+cd /var/www/html
+
+mkdir -p \
+    storage/app/public \
+    storage/framework/cache/data \
+    storage/framework/sessions \
+    storage/framework/views \
+    storage/logs
+
+rm -f public/storage
+ln -s /var/www/html/storage/app/public public/storage
+
+database_file="${DB_DATABASE:-/var/www/html/database/database.sqlite}"
+fresh_database=0
+if [ ! -s "$database_file" ]; then
+    mkdir -p "$(dirname "$database_file")"
+    touch "$database_file"
+    fresh_database=1
+fi
+
+chmod 664 "$database_file"
+chown -R www-data:www-data storage bootstrap/cache
+
+php artisan optimize:clear
+php artisan migrate --force
+
+if [ "$fresh_database" -eq 1 ]; then
+    php artisan db:seed --force
+fi
+
+php artisan config:cache
+php artisan route:cache
+php artisan view:cache
+
+exec "$@"
+

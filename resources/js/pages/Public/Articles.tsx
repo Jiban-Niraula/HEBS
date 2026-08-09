@@ -1,0 +1,3 @@
+import PublicPageFrame from '../../components/public/PublicPageFrame';
+
+export default function Articles() { return <PublicPageFrame title="Articles" eyebrow="Updates"><section className="container reading-page"><p className="page-summary">Articles on parenting, learning, study skills, teaching, child development, and community life will appear here when the editorial module is enabled.</p><div className="empty-state"><h2>Editorial publishing is being prepared.</h2><p>Official notices and school news remain the primary public updates for the launch period.</p></div></section></PublicPageFrame>; }

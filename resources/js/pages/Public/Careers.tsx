@@ -1,0 +1,9 @@
+import PublicPageFrame from '../../components/public/PublicPageFrame';
+
+type Opening = { id: number; title: string; department?: string; job_type: string; location?: string; summary?: string; description: string; requirements?: string[]; application_instructions?: string; application_deadline?: string; is_featured: boolean };
+type Page = { eyebrow: string; title: string; summary?: string; content?: string } | null;
+
+export default function Careers({ page, openings }: { page: Page; openings: Opening[] }) {
+  const title = page?.title || 'Careers & vacancies';
+  return <PublicPageFrame title={title} eyebrow={page?.eyebrow || 'Our School'}><section className="container careers-page"><div className="careers-intro"><p className="page-summary">{page?.summary}</p>{page?.content ? <p>{page.content}</p> : null}</div><div className="career-list">{openings.map((opening) => <article className={opening.is_featured ? 'is-featured' : ''} key={opening.id}><div className="career-meta"><span>{opening.department || 'School team'}</span><span>{opening.job_type.replaceAll('_', ' ')}</span>{opening.location ? <span>{opening.location}</span> : null}</div><h2>{opening.title}</h2><p>{opening.summary || opening.description}</p>{opening.requirements?.length ? <div><h3>Requirements</h3><ul>{opening.requirements.map((requirement) => <li key={requirement}>{requirement}</li>)}</ul></div> : null}<div className="career-footer">{opening.application_deadline ? <time>Apply by {new Date(opening.application_deadline).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</time> : <span>Open until filled</span>}<a className="button primary" href="/contact">Contact administration</a></div></article>)}{!openings.length ? <div className="empty-state"><h2>No current vacancies</h2><p>Approved opportunities will appear here when published by the administration.</p></div> : null}</div></section></PublicPageFrame>;
+}

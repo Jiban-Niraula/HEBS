@@ -1,0 +1,4 @@
+import PublicPageFrame from '../../components/public/PublicPageFrame';
+
+type Document = { id: number; title: string; category: string; description?: string; file_type?: string; file_path?: string; published_at?: string };
+export default function Downloads({ documents }: { documents: Document[] }) { return <PublicPageFrame title="Downloads" eyebrow="Resources"><section className="container listing-page"><p className="page-summary">Public documents for admissions, academics, examinations, policies, and school communication.</p><div className="download-list">{documents.map((document) => <article key={document.id}><div><span>{document.category} · {document.file_type ?? 'Document'}</span><h2>{document.title}</h2><p>{document.description}</p></div>{document.file_path ? <a className="button secondary" href={`/storage/${document.file_path}`}>Download</a> : <span className="document-status">Available from office</span>}</article>)}</div></section></PublicPageFrame>; }

@@ -1,0 +1,23 @@
+services:
+  web:
+    container_name: hebs-site
+    build:
+      context: .
+      args:
+        APP_UID: ${HOST_UID:-1000}
+        APP_GID: ${HOST_GID:-1000}
+    image: hebs-site:production
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    ports:
+      - "80:80"
+    volumes:
+      - ${HEBS_DATA_DIR:-./shared}/database.sqlite:/var/www/html/database/database.sqlite
+      - ${HEBS_DATA_DIR:-./shared}/uploads:/var/www/html/storage/app/public
+    healthcheck:
+      test: ["CMD", "php", "-r", "exit(@file_get_contents('http://127.0.0.1/api/v1/context?page=%2F') === false ? 1 : 0);"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s

@@ -1,0 +1,150 @@
+name: CI/CD
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hebs-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Laravel tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      APP_ENV: testing
+      DB_CONNECTION: sqlite
+      DB_DATABASE: ${{ github.workspace }}/database/ci.sqlite
+      CACHE_STORE: array
+      MAIL_MAILER: array
+      QUEUE_CONNECTION: sync
+      SESSION_DRIVER: array
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, pdo_sqlite
+          coverage: none
+          tools: composer:v2
+
+      - name: Cache Composer packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/composer/files
+          key: ${{ runner.os }}-composer-${{ hashFiles('composer.lock') }}
+          restore-keys: ${{ runner.os }}-composer-
+
+      - name: Install PHP dependencies
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Prepare test application
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+          touch database/ci.sqlite
+          php artisan migrate:fresh --seed --force
+
+      - name: Run Laravel tests
+        run: composer test
+
+  frontend:
+    name: React production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+  deploy:
+    name: Deploy to production VPS
+    needs:
+      - backend
+      - frontend
+    if: >-
+      github.event_name != 'pull_request' &&
+      github.ref == 'refs/heads/main' &&
+      vars.ENABLE_VPS_DEPLOYMENT == 'true'
+    runs-on:
+      - self-hosted
+      - linux
+      - hebs-production
+    timeout-minutes: 20
+    environment: production
+    env:
+      HEBS_DATA_DIR: ${{ vars.HEBS_DATA_DIR }}
+      PRODUCTION_ENV_FILE: ${{ secrets.PRODUCTION_ENV_FILE }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Verify deployment configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${PRODUCTION_ENV_FILE}" ]]; then
+            echo "The production environment secret is not configured." >&2
+            exit 1
+          fi
+          if [[ -z "${HEBS_DATA_DIR}" || "${HEBS_DATA_DIR}" != /* ]]; then
+            echo "HEBS_DATA_DIR must be configured as an absolute VPS path." >&2
+            exit 1
+          fi
+          if ! command -v docker >/dev/null || ! docker compose version >/dev/null; then
+            echo "Docker with the Compose plugin is required on the runner." >&2
+            exit 1
+          fi
+
+      - name: Prepare persistent storage and environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${HEBS_DATA_DIR}/uploads"
+          touch "${HEBS_DATA_DIR}/database.sqlite"
+          chmod 664 "${HEBS_DATA_DIR}/database.sqlite"
+          echo "HOST_UID=$(id -u)" >> "${GITHUB_ENV}"
+          echo "HOST_GID=$(id -g)" >> "${GITHUB_ENV}"
+          umask 077
+          printf '%s\n' "${PRODUCTION_ENV_FILE}" > .env.production
+
+      - name: Build and deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose -f compose.production.yml build --pull
+          docker compose -f compose.production.yml up -d --remove-orphans --wait --wait-timeout 120
+
+      - name: Show deployment status
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f .env.production ]]; then
+            docker compose -f compose.production.yml ps
+          fi
+
+      - name: Remove temporary environment file
+        if: always()
+        run: rm -f .env.production

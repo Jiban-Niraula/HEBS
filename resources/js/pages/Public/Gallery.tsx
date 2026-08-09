@@ -1,0 +1,5 @@
+import PublicPageFrame from '../../components/public/PublicPageFrame';
+
+type Album = { id: number; name: string; description?: string; category?: string; album_date?: string; cover_image_path?: string };
+const mediaUrl = (path?: string) => !path ? '/images/school-hero.jpg' : path.startsWith('http') || path.startsWith('/') ? path : `/storage/${path}`;
+export default function Gallery({ albums }: { albums: Album[] }) { return <PublicPageFrame title="Gallery" eyebrow="School Life"><section className="container listing-page"><p className="page-summary">A considered record of learning, participation, achievement, and community life.</p><div className="album-grid">{albums.map((album) => <article key={album.id}><div className="album-cover"><img src={mediaUrl(album.cover_image_path)} alt={album.name} /><span>{album.category}</span></div><h2>{album.name}</h2><p>{album.description}</p><small>{album.album_date ? new Date(album.album_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : 'School gallery'}</small></article>)}</div></section></PublicPageFrame>; }
