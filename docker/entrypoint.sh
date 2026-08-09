@@ -22,18 +22,21 @@ if [ ! -s "$database_file" ]; then
 fi
 
 chmod 664 "$database_file"
+chown www-data:www-data "$database_file"
 chown -R www-data:www-data storage bootstrap/cache
 
-php artisan optimize:clear
 php artisan migrate --force
 
 if [ "$fresh_database" -eq 1 ]; then
     php artisan db:seed --force
 fi
 
+# The database-backed cache table does not exist until migrations have run on a
+# first deployment. Clearing all caches before migrating makes a fresh
+# container exit with "no such table: cache".
+php artisan optimize:clear
 php artisan config:cache
 php artisan route:cache
 php artisan view:cache
 
 exec "$@"
-
